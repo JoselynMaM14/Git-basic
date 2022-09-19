@@ -1,0 +1,161 @@
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <UniversalTelegramBot.h>
+#define LED_BUILTIN 2
+#define SENSOR 27
+
+// Wifi network station credentials
+#define WIFI_SSID "Totalplay-57AA"
+#define WIFI_PASSWORD "57AA8A32hhn5HNeA"
+// Telegram BOT Token (Get from Botfather)
+#define BOT_TOKEN "5743441477:AAEwyHXTvBsTYcDvHJamuvDWkqzzjLIc4Mg"
+
+/// DEFINICION DE VARIABLES
+long currentMillis=0;
+long previousMillis=0;
+int interval=1000;
+boolean ledState=LOW;
+float calibrationFactor=4.5;
+volatile byte pulseCount;
+byte pulseSec=0;
+float flowRate;
+unsigned int flowMilliLitres;
+unsigned long totalMilliLitres;
+const unsigned long BOT_MTBS = 1000;
+//Variable necesaria para la utilización de telegram.
+int numNewMessages;//variable auxiliar para saber si se hha enviado un nuevo mensaje
+String chat_id;//variable que permite que el envio de los mensajes se lleve acabo.
+int duchastatus=0;
+WiFiClientSecure secured_client;
+UniversalTelegramBot bot(BOT_TOKEN, secured_client);
+unsigned long bot_lasttime;          // last time messages' scan has been done
+bool Start = false;
+
+//---Función que se ejecuta en interrupción---------------
+void pulseCounter()
+{
+  pulseCount++;
+}
+
+
+void setup()
+{
+  Serial.begin(115200);
+  Serial.println();
+
+  // attempt to connect to Wifi network:
+  Serial.print("Connecting to Wifi SSID ");
+  Serial.print(WIFI_SSID);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  secured_client.setCACert(TELEGRAM_CERTIFICATE_ROOT); // Add root certificate for api.telegram.org
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.print(".");
+    delay(500);
+  }
+  Serial.print("\nWiFi connected. IP address: ");
+  Serial.println(WiFi.localIP());
+
+  Serial.print("Retrieving time: ");
+  configTime(0, 0, "pool.ntp.org"); // get UTC time via NTP
+  time_t now = time(nullptr);
+  while (now < 24 * 3600)
+  {
+    Serial.print(".");
+    delay(100);
+    now = time(nullptr);
+  }
+////SENSOR FLUJO DE AGUA
+   Serial.begin(115200);
+ pinMode(LED_BUILTIN,OUTPUT);
+ pinMode(SENSOR, INPUT_PULLUP);
+ pulseCount=0;
+ flowRate=0.0;
+ flowMilliLitres=0;
+ totalMilliLitres=0;
+ previousMillis=0;
+
+ attachInterrupt(digitalPinToInterrupt(SENSOR), pulseCounter, FALLING);
+}
+
+void loop()
+{
+  if (millis() - bot_lasttime > BOT_MTBS)
+  {
+    int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+
+    while (numNewMessages)
+    {
+      Serial.println("got response");
+      handleNewMessages(numNewMessages);
+      numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+    }
+
+    bot_lasttime = millis();
+
+  }
+  if(duchastatus=1)
+  {
+    sensorflujo();
+  }
+}
+
+void sensorflujo()
+{
+    ///SENSOR FLUJO AGUA
+  
+    currentMillis=millis();
+  if((currentMillis-previousMillis)>interval)
+  {
+    pulseSec=pulseCount;
+    pulseCount=0;
+    flowRate=((100.0/(millis()-previousMillis))*pulseSec)/calibrationFactor;
+    previousMillis=millis();
+    flowMilliLitres = (flowRate/60)*1000;
+    totalMilliLitres+= flowMilliLitres;
+
+Serial.print("Flujo de agua: ");
+Serial.print(int(flowRate));  // Print the integer part of the variable
+Serial.print("L/min");
+Serial.print("\t");       // Print tab space
+Serial.print("Cantidad de salida: ");
+Serial.print(totalMilliLitres);
+Serial.print("mL / ");
+Serial.print(totalMilliLitres / 1000);
+Serial.println("L");
+
+  Serial.println(chat_id);
+  Serial.println(numNewMessages);
+      bot.sendMessage(chat_id, "EL flujo de agua es: " + String(flowRate));
+      bot.sendMessage(chat_id, "Salida de agua es: " + String(totalMilliLitres));
+}
+//// envío telegram
+  void handleNewMessages(int numNewMessages)
+{
+  Serial.println("handleNewMessages");
+  Serial.println(String(numNewMessages));
+
+  for (int i = 0; i < numNewMessages; i++)
+  {
+    String chat_id = bot.messages[i].chat_id;
+    String text = bot.messages[i].text;
+
+    String from_name = bot.messages[i].from_name;
+    if (from_name == "")
+      from_name = "Guest";
+
+    if (text == "/Inicioducha")
+    {
+      duchastatus=1;
+      
+      
+    }
+
+    if (text == "/start")
+    {
+      String welcome = "Bienvenido a Atoyatl; dispositivo que te permite monitorear el flujo de agua en la ducha., " + from_name + ".\n";
+      welcome += "/Inicioducha:";
+      bot.sendMessage(chat_id,welcome, "Markdown");
+    }
+  }
+}
